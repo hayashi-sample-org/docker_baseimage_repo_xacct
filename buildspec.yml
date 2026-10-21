@@ -24,6 +24,8 @@ phases:
       - echo "===== pre_build 開始 ====="
       # ECRのURIを組み立てる
       - ECR_URI="${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com/${ECR_REPOSITORY}"
+      # タグ付きイメージ参照を組み立てる（build行にコロンを書かないための変数）
+      - ECR_IMAGE="${ECR_URI}:${IMAGE_TAG}"
       # ECRにログイン
       - echo "ECRにログイン"
       - aws ecr get-login-password --region ${AWS_REGION} | docker login --username AWS --password-stdin ${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com
@@ -33,15 +35,15 @@ phases:
 
   build:
     commands:
-      - echo "===== build 開始（マルチアーキ: amd64 + arm64） ====="
+      - echo "===== build 開始（マルチアーキ amd64 + arm64） ====="
       # buildx用のビルダーを作成して有効化（docker-containerドライバ）
-      # ※案B: binfmt/QEMUを別途登録せず、buildx同梱のエミュレーションに任せる
+      # 案B binfmt/QEMUを別途登録せず、buildx同梱のエミュレーションに任せる
       - docker buildx create --use --name multiarch-builder
       # ビルダーを初回起動（ここでエミュレーション対応プラットフォームが確定する）
       - docker buildx inspect --bootstrap
       # マルチアーキ（amd64+arm64）でビルドし、そのまま ECR へ push（--push）
       # マルチアーキ成果物はローカルに保持できないため build と push を一体化する
-      - "docker buildx build --platform linux/amd64,linux/arm64 --build-arg CODEARTIFACT_AUTH_TOKEN=${CODEARTIFACT_AUTH_TOKEN} -t ${ECR_URI}:${IMAGE_TAG} --push ."
+      - docker buildx build --platform linux/amd64,linux/arm64 --build-arg CODEARTIFACT_AUTH_TOKEN=${CODEARTIFACT_AUTH_TOKEN} -t ${ECR_IMAGE} --push .
 
   post_build:
     commands:
