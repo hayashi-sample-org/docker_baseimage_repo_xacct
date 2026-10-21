@@ -41,7 +41,7 @@ phases:
       - docker buildx inspect --bootstrap
       # マルチアーキ（amd64+arm64）でビルドし、そのまま ECR へ push（--push）
       # マルチアーキ成果物はローカルに保持できないため build と push を一体化する
-      - docker buildx build --platform linux/amd64,linux/arm64 --build-arg CODEARTIFACT_AUTH_TOKEN=${CODEARTIFACT_AUTH_TOKEN} -t ${ECR_URI}:${IMAGE_TAG} --push .
+      - "docker buildx build --platform linux/amd64,linux/arm64 --build-arg CODEARTIFACT_AUTH_TOKEN=${CODEARTIFACT_AUTH_TOKEN} -t ${ECR_URI}:${IMAGE_TAG} --push ."
 
   post_build:
     commands:
