@@ -33,20 +33,25 @@ phases:
 
   build:
     commands:
-      - echo "===== build 開始 ====="
-      # Otel入りのJavaイメージをビルド（トークンをbuild-argで渡す）
-      - docker build --build-arg CODEARTIFACT_AUTH_TOKEN=${CODEARTIFACT_AUTH_TOKEN} -t ${ECR_REPOSITORY}:${IMAGE_TAG} .
-      # ECR向けにタグ付け
-      - docker tag ${ECR_REPOSITORY}:${IMAGE_TAG} ${ECR_URI}:${IMAGE_TAG}
+      - echo "===== build 開始（マルチアーキ: amd64 + arm64） ====="
+      # buildx用のビルダーを作成して有効化（docker-containerドライバ）
+      # ※案B: binfmt/QEMUを別途登録せず、buildx同梱のエミュレーションに任せる
+      - docker buildx create --use --name multiarch-builder
+      # ビルダーを初回起動（ここでエミュレーション対応プラットフォームが確定する）
+      - docker buildx inspect --bootstrap
+      # マルチアーキ（amd64+arm64）でビルドし、そのまま ECR へ push（--push）
+      # マルチアーキ成果物はローカルに保持できないため build と push を一体化する
+      - docker buildx build --platform linux/amd64,linux/arm64 --build-arg CODEARTIFACT_AUTH_TOKEN=${CODEARTIFACT_AUTH_TOKEN} -t ${ECR_URI}:${IMAGE_TAG} --push .
 
   post_build:
     commands:
       - echo "===== post_build 開始 ====="
-      # ECRにpush
-      - docker push ${ECR_URI}:${IMAGE_TAG}
+      # ※ push は build フェーズの docker buildx --push で完了済み（ここでの docker push は不要）
       # ===== ここから AWS Signer + notation による署名 =====
       - echo "===== イメージ署名 開始 ====="
       # pushしたイメージのdigestを取得（タグではなくdigestで署名するのが安全）
+      # ※マルチアーキの場合、この digest は image index（マニフェストリスト）の digest
+      #   → index 全体に1つ署名が付く（各アーキ子manifestへの個別署名は今回は行わない）
       - IMAGE_DIGEST=$(aws ecr describe-images --repository-name ${ECR_REPOSITORY} --image-ids imageTag=${IMAGE_TAG} --region ${AWS_REGION} --query 'imageDetails[0].imageDigest' --output text)
       - echo "署名対象 digest=${IMAGE_DIGEST}"
       # notationのECR認証情報を環境変数で渡す（CodeBuild環境にはクレデンシャルストアが無いためloginは使わない）
