@@ -4,11 +4,16 @@ version: 0.2
 #   AWS_REGION                 : ap-northeast-1
 #   AWS_ACCOUNT_ID             : AWSアカウントID
 #   ECR_REPOSITORY             : java-otel-app
-#   IMAGE_TAG                  : latest
 #   CODEARTIFACT_DOMAIN        : artifact-domain
 #   CODEARTIFACT_DOMAIN_OWNER  : CodeArtifactドメイン所有者（アカウントID）
 #   SIGNING_PROFILE_ARN        : AWS Signer署名プロファイルのARN（イメージ署名に使用）
 # これらをソースに書かないことで、パブリックリポジトリにアカウントID等を残さない。
+#
+# ★イメージタグ(IMAGE_TAG)は環境変数で固定せず、git のタグ push 起動時に
+#   CodeBuild が渡す CODEBUILD_WEBHOOK_TRIGGER（例: "tag/1.0.0"）から
+#   pre_build 内で動的に決める。git タグは "v" なしの x.x.x 形式で打つ運用
+#   （webhook フィルタも ^refs/tags/[0-9]+\.[0-9]+\.[0-9]+$ で v なしに限定）。
+#   latest は使わない。
 
 phases:
   install:
@@ -27,6 +32,20 @@ phases:
       - echo "===== pre_build 開始 ====="
       # ECRのURIを組み立てる
       - ECR_URI="${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com/${ECR_REPOSITORY}"
+      # --- git タグ名から ECR イメージタグを決める ---
+      # CodeBuild はタグ push で起動すると CODEBUILD_WEBHOOK_TRIGGER に "tag/1.0.0" を入れてくる
+      - echo "CODEBUILD_WEBHOOK_TRIGGER=${CODEBUILD_WEBHOOK_TRIGGER}"
+      # "tag/" より後ろ（= 1.0.0）を取り出す
+      - GIT_TAG="${CODEBUILD_WEBHOOK_TRIGGER#tag/}"
+      # git タグは "v" なし運用だが、念のため先頭に "v" があれば落とす（無ければそのまま）
+      - IMAGE_TAG="${GIT_TAG#v}"
+      # タグ push 以外（GIT_TAG が空、または "tag/" で始まっていない）なら安全のため中断
+      - |
+        if [ -z "${IMAGE_TAG}" ] || [ "${IMAGE_TAG}" = "${CODEBUILD_WEBHOOK_TRIGGER}" ]; then
+          echo "ERROR: タグ push 起動ではありません。CODEBUILD_WEBHOOK_TRIGGER=${CODEBUILD_WEBHOOK_TRIGGER}" >&2
+          exit 1
+        fi
+      - echo "使用するイメージタグ IMAGE_TAG=${IMAGE_TAG}"
       # タグ付きイメージ参照を組み立てる（build行にコロンを書かないための変数）
       - ECR_IMAGE="${ECR_URI}:${IMAGE_TAG}"
       # ECRにログイン
