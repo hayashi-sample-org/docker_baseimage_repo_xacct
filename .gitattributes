@@ -1,0 +1,3 @@
+# シェルスクリプトは必ず LF 改行で管理する（CodeBuild=Linux で実行するため）
+# Windows で編集して CRLF になっても、コミット時に LF に正規化される
+*.sh text eol=lf

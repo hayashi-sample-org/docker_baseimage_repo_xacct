@@ -18,6 +18,9 @@ phases:
       - curl -fsSL https://d2hvyiie56hcat.cloudfront.net/linux/amd64/installer/rpm/latest/aws-signer-notation-cli_amd64.rpm -o /tmp/notation.rpm
       - yum install -y /tmp/notation.rpm
       - notation version
+      # 子manifestのdigest抽出に使うjqを明示的にインストール（標準イメージに同梱の見込みだが確実にするため）
+      - yum install -y jq
+      - jq --version
 
   pre_build:
     commands:
@@ -50,15 +53,20 @@ phases:
       - echo "===== post_build 開始 ====="
       # ※ push は build フェーズの docker buildx --push で完了済み（ここでの docker push は不要）
       # ===== ここから AWS Signer + notation による署名 =====
-      - echo "===== イメージ署名 開始 ====="
+      - echo "===== イメージ署名 開始（index＋子manifest） ====="
       # pushしたイメージのdigestを取得（タグではなくdigestで署名するのが安全）
       # ※マルチアーキの場合、この digest は image index（マニフェストリスト）の digest
-      #   → index 全体に1つ署名が付く（各アーキ子manifestへの個別署名は今回は行わない）
+      #   → まず index 全体に1署名を付ける（この後、子manifestにも個別署名する）
       - IMAGE_DIGEST=$(aws ecr describe-images --repository-name ${ECR_REPOSITORY} --image-ids imageTag=${IMAGE_TAG} --region ${AWS_REGION} --query 'imageDetails[0].imageDigest' --output text)
-      - echo "署名対象 digest=${IMAGE_DIGEST}"
+      - echo "署名対象 index digest=${IMAGE_DIGEST}"
       # notationのECR認証情報を環境変数で渡す（CodeBuild環境にはクレデンシャルストアが無いためloginは使わない）
       - export NOTATION_USERNAME=AWS
       - export NOTATION_PASSWORD=$(aws ecr get-login-password --region ${AWS_REGION})
-      # AWS Signerプラグインを使って署名（digest指定・署名プロファイルARN指定）
+      # ①index（目次）に署名
       - notation sign ${ECR_URI}@${IMAGE_DIGEST} --plugin "com.amazonaws.signer.notation.plugin" --id "${SIGNING_PROFILE_ARN}"
+      # ②子manifest（amd64/arm64の本体）に個別署名
+      #   jqのコロン・クォートでYAMLパースを崩さないよう、処理はヘルパースクリプトに隔離している
+      #   スクリプトが使う変数を export してから呼び出す
+      - export ECR_URI ECR_IMAGE SIGNING_PROFILE_ARN
+      - bash scripts/sign-children.sh
       - echo "===== 完了 ====="
